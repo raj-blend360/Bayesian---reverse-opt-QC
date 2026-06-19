@@ -1,0 +1,87 @@
+data:
+  csv_path: "wkly_clara_data_31Jul 2.csv"
+  date_col: "date"
+  response_col: "response_metric_inbound_signups_total"
+  frequency: "weekly"
+  dayfirst: true
+
+# Use schema-driven variable selection so we don't rely on prefixes.
+# NOTE: Replace these columns if your CSV uses different names.
+variables:
+  media:
+    - column: "media_clicks_clara_dv360"
+      channel: "clara_dv360"
+      channel_type: "paid_display"
+      metric_type: "clicks"
+      spend_column: "spends_clara_dv360"
+    - column: "media_clicks_clara_google"
+      channel: "clara_google"
+      channel_type: "paid_search"
+      metric_type: "clicks"
+      spend_column: "spends_clara_google"
+    - column: "media_clicks_clara_linkedin"
+      channel: "clara_linkedin"
+      channel_type: "paid_social"
+      metric_type: "clicks"
+      spend_column: "spends_clara_linkedin"
+    - column: "media_clicks_clara_meta"
+      channel: "clara_meta"
+      channel_type: "paid_social"
+      metric_type: "clicks"
+      spend_column: "spends_clara_meta"
+
+model:
+  baseline_type: "linear_trend"
+  fourier_order: 2
+  use_lag: false
+  max_lag: 0
+
+sampling:
+  # Keep this small for a fast smoke test (still valid: chains>=2).
+  runtime_mode: "standard"
+  draws: 50
+  tune: 50
+  chains: 2
+  target_accept: 0.9
+  max_quality_flag: 2
+  reject_if_all_bad: false
+
+pipeline:
+  use_hybrid_fast_scan: false
+  # Smoke-test speedups
+  skip_stage0: true
+  skip_map: true
+  top_n_map: 4
+  top_k_refit: 1
+  response_transform: "log1p"
+
+validation:
+  enable_strict_validation: false
+  enable_outlier_detection: true
+
+output:
+  dir: "mmm_outputs_smoke"
+  export_excel: false
+
+optimisation:
+  budget_period      : "monthly"
+  total_budget       : null
+  default_spend_flex : 0.30
+  step_size          : null
+  target_period      : "monthly"
+  target_response    : null
+  channel_constraints: {}
+  cpp_rates: {}
+  # cpp_rates:
+  #   media_impressions_clara_meta:   0.00080   # £ per impression
+  #   media_impressions_clara_google: 0.00125
+  #   media_clicks_clara_dv360:       0.45      # £ per click
+  #   media_clicks_clara_linkedin:    1.20
+
+scenarios:
+  budget_period   : "monthly"
+  n_samples       : 200
+  include_current : true
+  preset_pcts     : [-20, -10, 10, 20]
+  custom: []
+

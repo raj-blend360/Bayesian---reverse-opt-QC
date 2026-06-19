@@ -1,0 +1,6 @@
+clients:
+  - id: "client_a"
+    config: "configs/client_a_mmm.yaml"
+  - id: "client_b"
+    config: "configs/client_b_mmm.yaml"
+

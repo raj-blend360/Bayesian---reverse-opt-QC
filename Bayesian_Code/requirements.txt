@@ -1,0 +1,40 @@
+# ──────────────────────────────────────────────────────────────
+# Bayesian MMM — Python Dependencies
+# Tested with Python 3.10+
+# Install: pip install -r requirements.txt
+# ──────────────────────────────────────────────────────────────
+
+# ── Core Bayesian stack ───────────────────────────────────────
+pymc>=5.10.0
+arviz>=0.18.0
+pytensor>=2.20.0
+
+# ── NumPyro / JAX backend (required for nuts_sampler="numpyro") ──
+# Enables JIT-compiled NUTS — typically 5-10x faster than PyTensor NUTS,
+# especially critical for daily data (large T) with recurrent adstock scans.
+numpyro>=0.13.0
+jax>=0.4.23
+jaxlib>=0.4.23
+
+# ── Numerical / data ──────────────────────────────────────────
+numpy>=1.26.0
+pandas>=2.1.0
+scipy>=1.12.0
+
+# ── Visualisation ────────────────────────────────────────────
+matplotlib>=3.8.0
+
+# ── Config / serialisation ────────────────────────────────────
+pyyaml>=6.0.1
+
+# ── Parallelism (Stage 0 parallel scan) ───────────────────────
+joblib>=1.3.0
+
+# ── Optimisation (budget allocation) ──────────────────────────
+scipy>=1.12.0
+
+# ── Excel export (optional — required for export_excel: true) ─
+openpyxl>=3.1.2
+
+# ── Notebook support (optional — required for Jupyter usage) ──
+ipython>=8.0.0

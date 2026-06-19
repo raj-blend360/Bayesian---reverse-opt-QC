@@ -1,0 +1,465 @@
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Data settings ───────────────────────────────────────────────────────────
+data:
+  csv_path     : 'wkly_clara_data_31Jul 2.csv'   # file lives in the Data/ subfolder
+  date_col     : 'date'
+  response_col : 'response_metric_inbound_deals_total'
+  frequency    : 'weekly'       # weekly data → Fourier period = 52.18
+  dayfirst     : true           # IMPORTANT: dates are DD-MM-YYYY format
+  min_date     : null           # use all data
+  max_date     : null
+
+# ── Variable definitions ────────────────────────────────────────────────────
+variables:
+
+  # ── Media channels — using Impressions for all 4 channels ──────────────────
+  #
+  # SCENARIO 2 CHANGE: channels now have real families instead of 'generic'.
+  # This activates Case A in model_builder.py (Block 7):
+  #
+  #   F = 3 families  →  search (Google), display (DV360), social (LinkedIn + Meta)
+  #   C = 4 channels
+  #
+  # What family pooling does per channel:
+  #   Google    ← pulls toward the typical 'search' effectiveness & decay
+  #   DV360     ← pulls toward the typical 'display' effectiveness & decay
+  #               (important: DV360 has 43 zero weeks, so this stabilises it)
+  #   LinkedIn  ← pulls toward the 'social' family mean
+  #   Meta      ← pulls toward the SAME 'social' family mean as LinkedIn
+  #               (LinkedIn and Meta learn from each other via shared mu_beta_social)
+
+  media:
+
+    - column      : 'media_impressions_clara_google'
+      channel     : 'Google'
+      channel_type: 'paid_search'
+      metric_type : 'impressions'
+      spend_column: 'spends_clara_google'
+      family      : 'search'       # CHANGED from 'generic' → own search family
+
+    - column      : 'media_impressions_clara_dv360'
+      channel     : 'dv360'
+      channel_type: 'display'
+      metric_type : 'impressions'
+      spend_column: 'spends_clara_dv360'
+      family      : 'display'      # CHANGED from 'generic' → own display family
+      # 43 of 84 weeks are zero — family pooling stabilises this estimate
+
+    - column      : 'media_impressions_clara_linkedin'
+      channel     : 'linkedin'
+      channel_type: 'paid_social'
+      metric_type : 'impressions'
+      spend_column: 'spends_clara_linkedin'
+      family      : 'social'       # CHANGED from 'generic' → shared social family
+
+    - column      : 'media_impressions_clara_meta'
+      channel     : 'meta'
+      channel_type: 'paid_social'
+      metric_type : 'impressions'
+      spend_column: 'spends_clara_meta'
+      family      : 'social'       # CHANGED from 'generic' → shared social family
+      # LinkedIn and Meta now share a social-family prior — they learn from each other
+
+  base   : []   # no price / promo / distribution variables in this dataset
+  macro  : []   # no macro-economic covariates
+  events : []   # no holiday / event dummy variables
+          # - column: 'fraud_activity'
+
+# ── Model settings ──────────────────────────────────────────────────────────
+model:
+  # linear_trend  = straight-line baseline (good default — cannot absorb individual-week spikes,
+  #                 so event flags and media get proper credit for anomalous weeks)
+  # gaussian_random_walk = very flexible, bends to fit every week individually —
+  #                 AVOID when you have event flags: the GRW will absorb the event spike
+  #                 before the flag gets a chance to explain it.
+  baseline_type : 'gaussian_random_walk'
+  fourier_order : 2
+  use_lag       : true
+  max_lag       : 0
+
+# ── Hierarchical settings ───────────────────────────────────────────────────
+# SCENARIO 2: Hierarchy ENABLED with channel families.
+#
+# What the sigma values control (think of them as "how tight is the family rope?"):
+#
+#   family_beta_sigma  = how different can families be from each other?
+#                        0.5 = loose (search can be very different from social)
+#                        0.1 = tight (all families forced to look similar)
+#
+#   channel_beta_sigma = how different can channels be within the same family?
+#                        0.3 = some freedom (LinkedIn can differ from Meta a bit)
+#                        0.05 = tight (LinkedIn and Meta nearly identical)
+#
+# The prior structure built in Block 7 of model_builder.py:
+#   mu_beta_search  ~ Normal(0, 0.5)   ← family-level mean for search
+#   mu_beta_social  ~ Normal(0, 0.5)   ← family-level mean for social
+#   mu_beta_display ~ Normal(0, 0.5)   ← family-level mean for display
+#   sigma_beta_*    ~ HalfNormal(0.3)  ← within-family spread
+#   beta_google  = softplus(mu_beta_search  + sigma_search  × z_google)
+#   beta_linkedin = softplus(mu_beta_social + sigma_social  × z_linkedin)
+#   beta_meta    = softplus(mu_beta_social  + sigma_social  × z_meta)
+#   beta_dv360   = softplus(mu_beta_display + sigma_display × z_dv360)
+hierarchical:
+  enabled                   : true    # CHANGED: hierarchy ON
+
+  family_beta_sigma         : 0.5    # across-family variation (how different can families be)
+  channel_beta_sigma        : 0.3    # within-family variation (how different channels within a family)
+  product_beta_sigma        : 0.5    # unused here (P=1, single product)
+
+  # Advanced features — all off for this first run
+  use_two_timescale_adstock : false
+  use_synergies             : false
+  use_campaigns             : false
+  use_halos                 : false
+  use_global_hill           : false
+  use_time_varying_betas    : false
+  use_dynamic_saturation    : false
+
+  # Data validation — strict validation OFF because T=84 < min_T=100
+  # Turn strict_validation back ON once you have more data (100+ weeks)
+  enable_strict_validation  : false
+  enable_outlier_detection  : true
+  enable_collinearity_check : true
+  enable_stationarity_test  : true
+
+# ── Sampling settings ───────────────────────────────────────────────────────
+# fast_20m mode automatically caps:
+#   draws       → 800   (even if you write 1200 below)
+#   tune        → 500   (even if you write 600 below)
+#   top_k_refit → 1
+#   skip_map    → true
+# Switch to runtime_mode: 'standard' for a production-quality run.
+sampling:
+  # Switched from fast_20m to standard so draws/tune are NOT capped.
+  # ESS=103 in the previous run (need ≥400). More draws fixes this.
+  runtime_mode  : 'standard' #'fast_20m'
+  draws         : 2000          # capped to 800 by fast_20m
+  tune          : 1000          # capped to 500 by fast_20m
+  chains        : 2
+  target_accept : 0.95
+
+  # Quality gate — relaxed because T=84 < 100 (produces quality_flag=2 by design)
+  max_quality_flag  : 2         # 0=production, 1=acceptable, 2=exploratory
+  reject_if_all_bad : false     # do not hard-fail if all models are flagged poor
+
+# ── Output — separate folder so Scenario 1 results are preserved ─────────────
+
+# ── Pipeline settings ───────────────────────────────────────────────────────
+pipeline:
+  response_transform  : 'log1p'   # log(1+y) — standard for deal/signup counts
+  skip_stage0         : false      # SKIP per-channel adstock scan for speed
+                                  # Stage 0 would try 4 channels × 8 combos = 32 models
+                                  # All channels default to geometric + softplus
+                                  # Set to false for a thorough production run
+  skip_map            : true      # already forced true by fast_20m; explicit here
+  top_n_map           : 8         # keep top 8 configs from grid for Stage 1b
+  top_k_refit         : 1         # refit 1 model in Stage 2 (capped by fast_20m)
+  use_hybrid_fast_scan: true      # fast Optuna scan selects best adstock×sat per channel
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ALL PRIORS — configured here, override Python defaults in config.py
+# and prior_library.py. This is the single authoritative source for priors.
+#
+# Structure:
+#   priors:
+#     pooling:   Layer 1 — how tightly channels pool within / across families
+#     families:  Layer 2 — expected adstock decay speed per channel family
+#     channels:  Layer 3 — per-channel beta, adstock, and likelihood priors
+# ══════════════════════════════════════════════════════════════════════════════
+priors:
+
+  # ── LAYER 1: Family pooling strength ──────────────────────────────────────
+  # Controls how much channels within the same family share information.
+  #
+  # family_beta_sigma  — how different can families be FROM EACH OTHER?
+  #   0.2 = tight: search ≈ social ≈ display (almost no between-family variation)
+  #   0.5 = moderate: families have their own character  ← current
+  #   1.0 = loose: families can look very different
+  #
+  # channel_beta_sigma — how different can channels be WITHIN THEIR FAMILY?
+  #   0.1 = tight: LinkedIn ≈ Meta (almost identical within social family)
+  #   0.3 = moderate: channels can deviate somewhat from family mean  ← current
+  #   0.6 = loose: channels free to ignore family mean
+  #
+  # Symptom → fix:
+  #   "LinkedIn and Meta look identical"     → increase channel_beta_sigma
+  #   "Search and social look the same"      → increase family_beta_sigma
+  #   "DV360 is being dragged by its family" → increase channel_beta_sigma
+  pooling:
+    family_beta_sigma  : 0.5   # overrides hierarchical.family_beta_sigma
+    channel_beta_sigma : 0.3   # overrides hierarchical.channel_beta_sigma
+    product_beta_sigma : 0.5   # (unused here — only relevant for multi-product)
+
+  # ── LAYER 2: Family adstock half-lives ────────────────────────────────────
+  # Controls the STARTING GUESS for how long effects last per channel family.
+  # The model still learns the actual value from data — this is just the prior.
+  #
+  # hl_slow_median  = prior median half-life in WEEKS
+  #   search  → 2.5 weeks (Google pays off quickly)
+  #   social  → 1.5 weeks (LinkedIn/Meta fade fast)
+  #   display → 2.0 weeks (DV360 lingers a bit longer)
+  #
+  # hl_sigma = uncertainty around that median (log-scale)
+  #   0.3 = tight: model is confident in the half-life estimate
+  #   0.5 = loose: model allows a wide range of half-lives  ← current
+  #
+  # Symptom → fix:
+  #   "Google's effect decays too fast"     → increase search hl_slow_median
+  #   "DV360 seems to have no carryover"    → increase display hl_slow_median
+  #   "Social decays unrealistically fast"  → increase social hl_slow_median
+  families:
+    search:
+      hl_slow_median  : 2.5    # weeks — Google/Bing: fast response
+      hl_ratio_median : 3.0    # slow_hl / fast_hl ratio (two-timescale only)
+      hl_sigma        : 0.4    # uncertainty on half-life
+
+    social:
+      hl_slow_median  : 1.5    # weeks — LinkedIn/Meta: quick decay
+      hl_ratio_median : 2.5
+      hl_sigma        : 0.4
+
+    display:
+      hl_slow_median  : 2.0    # weeks — DV360: slightly longer awareness effect
+      hl_ratio_median : 2.5
+      hl_sigma        : 0.4
+
+  # ── LAYER 3: Per-channel priors ───────────────────────────────────────────
+  # Fine-tune individual channel priors after seeing results that don't make sense.
+  #
+  # beta_sigma    — prior width on channel EFFECTIVENESS
+  #   smaller = model is more certain, pulls toward prior (use when data is noisy)
+  #   larger  = model is less certain, lets data decide (use when data is rich)
+  #
+  # adstock_alpha / adstock_beta — Beta(alpha, beta) prior on decay rate λ ∈ (0,1)
+  #   high alpha, low beta  → expects fast decay (λ close to 1, effect gone quickly)
+  #   low alpha, high beta  → expects slow decay (λ close to 0, effect lingers)
+  #   equal alpha and beta  → neutral prior centered at 0.5
+  #
+  # likelihood — observation model
+  #   student_t   = default, robust to outlier weeks
+  #   normal      = faster but assumes clean data
+  #
+  # Symptom → fix:
+  #   "Google beta is too large"     → lower beta_sigma (e.g. 0.3 instead of 0.5)
+  #   "DV360 posterior is very wide" → lower beta_sigma (tighter prior)
+  #   "LinkedIn decays too fast"     → lower adstock_alpha or raise adstock_beta
+  channels:
+    media_impressions_clara_google:
+      beta_sigma    : 0.5     # paid_search default — reasonable for search
+      adstock_alpha : 5.0     # Beta(5,2) → fast decay prior, typical for search
+      adstock_beta  : 2.0
+      likelihood    : 'student_t'
+
+    media_impressions_clara_dv360:
+      beta_sigma    : 0.3     # display default — tighter because many zero weeks
+      adstock_alpha : 3.0     # Beta(3,1.5) → moderate decay, slightly slow
+      adstock_beta  : 1.5
+      likelihood    : 'student_t'
+
+    media_impressions_clara_linkedin:
+      beta_sigma    : 0.4     # paid_social default
+      adstock_alpha : 4.0     # Beta(4,3) → moderate-fast decay
+      adstock_beta  : 3.0
+      likelihood    : 'student_t'
+
+    media_impressions_clara_meta:
+      beta_sigma    : 0.4     # paid_social default
+      adstock_alpha : 4.0     # Beta(4,3) — same family as LinkedIn
+      adstock_beta  : 3.0
+      likelihood    : 'student_t'
+
+# ── Optimisation settings ───────────────────────────────────────────────────
+# Controls both the forward optimiser (maximise response given a budget) and
+# the reverse optimiser (minimise spend to hit a response target).
+#
+# budget_period / target_period — time window for the budget or target:
+#   "per_period"     one model period (one week for weekly data)
+#   "monthly"        calendar month  (~4.35 weeks)
+#   "quarterly"      3 calendar months (~13 weeks)
+#   "yearly"         12 calendar months (~52 weeks)
+#   "training_total" entire training window
+#   "training_mean"  mean per model period  ← default (backward-compatible)
+#
+# total_budget     — actual spend in RAW units for the chosen period
+#                    e.g. 1_500_000 means 1.5 M impressions per month
+#                    Set to null to use the observed mean spend for that period.
+#
+# target_response  — desired response in ORIGINAL units for the chosen period
+#                    e.g. 120 means 120 inbound deals per month
+#                    Set to null to use the observed mean response for that period.
+optimisation:
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # SPEND UNIT AUTO-DETECTION
+  # ══════════════════════════════════════════════════════════════════════════
+  # The optimizer detects each channel's metric type automatically from its
+  # column name prefix (media_impressions_* → CPM computed from spends_*,
+  # media_clicks_* → CPC computed from spends_*, spends_* → direct spend).
+  # You can mix metric types freely within the same model.
+  #
+  # Override the computed CPP for any channel if you know the rate exactly:
+  #   cpp_rates:
+  #     media_impressions_clara_dv360   : 0.001603   # GBP per impression
+  #     media_clicks_clara_google       : 0.45        # GBP per click
+  # cpp_rates:  # uncomment and add entries to override auto-computed rates
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # CHANNEL BUDGET GUARDRAILS
+  # ══════════════════════════════════════════════════════════════════════════
+  # These set a floor and a ceiling on how much of the monthly budget each
+  # channel can receive, expressed as a fraction between 0 and 1 (not %).
+  #
+  #   min_pct = guaranteed minimum share of the monthly budget
+  #             e.g. 0.05 means "always give this channel at least 5%"
+  #
+  #   max_pct = hard cap on the share this channel can receive
+  #             e.g. 0.70 means "never give this channel more than 70%"
+  #
+  # Rules:
+  #   • All min_pct values must sum to LESS than 1.0, otherwise impossible.
+  #   • Set min_pct: 0.0 to allow a channel to receive nothing if inefficient.
+  #   • Set max_pct: 1.0 to leave a channel uncapped.
+  #   • To fix a channel at exactly its current spend, remove it from here
+  #     and add it under channel_constraints with fixed: true.
+  channel_share_bounds:
+    google   : { min_pct: 0.05, max_pct: 0.70 }
+    dv360    : { min_pct: 0.05, max_pct: 0.60 }
+    linkedin : { min_pct: 0.05, max_pct: 0.60 }
+    meta     : { min_pct: 0.05, max_pct: 0.60 }
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # ALLOCATION STEP SIZE
+  # ══════════════════════════════════════════════════════════════════════════
+  # Controls how finely the optimiser distributes the budget.
+  #
+  # round_budget_pct (recommended):
+  #   Each step allocates this fraction of whatever budget is still unallocated.
+  #   e.g. 0.02 = 2% steps.  Starts large, shrinks as budget fills up.
+  #   Typical range: 0.01 (fine / slow) to 0.05 (coarse / fast).
+  #   Set to null to use fixed step_size instead.
+  #
+  # step_size:
+  #   A fixed £ amount per step.  e.g. 1000 = allocate in £1,000 increments.
+  #   Only used when round_budget_pct is null.
+  #   null = auto (1% of monthly budget).
+  round_budget_pct : 0.02
+  step_size        : null
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # DEFAULT CHANNEL FLEX (fallback when no channel_share_bounds set)
+  # ══════════════════════════════════════════════════════════════════════════
+  # How much each channel can deviate from its current observed spend.
+  # 0.30 = allowed to go up OR down by 30% from its historical average.
+  # Only applies to channels not listed in channel_share_bounds above.
+  default_spend_flex : 0.30
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # OPTIMISATION SCENARIOS
+  # ══════════════════════════════════════════════════════════════════════════
+  # All 4 scenarios run when you execute:
+  #   python analyze.py sequential --config config_hier.yaml
+  #
+  # Results go into:
+  #   • sequential_results.xlsx   (standalone workbook, one sheet per scenario)
+  #   • model_results.xlsx        (Optimisation_Scenarios tab — exact format
+  #                                shown in the brief, all 4 scenarios stacked)
+  #
+  # ── SCENARIO TYPE ────────────────────────────────────────────────────────
+  # type: forward
+  #   Given a total budget, find the BEST possible channel split.
+  #   → Use when: "I have £X to spend — how should I split it?"
+  #
+  # type: reverse
+  #   Given a response target, find the MINIMUM spend needed to hit it.
+  #   → Use when: "I need Y signups — what's the cheapest way to get them?"
+  #
+  # ── PLANNING HORIZON (n_months) ──────────────────────────────────────────
+  # Controls how many months the plan covers.  Months are linked — the
+  # carry-over effect from month 1 feeds into month 2, and so on.
+  #
+  #   n_months: 1   → single month plan  (most common for monthly budgets)
+  #   n_months: 3   → quarterly plan     (Q1, Q2, Q3, or Q4 planning)
+  #   n_months: 6   → half-year plan
+  #   n_months: 12  → full annual plan
+  #
+  # ── BUDGET AMOUNT (forward scenarios only) ───────────────────────────────
+  # Two ways to set the budget — use ONE of these per scenario:
+  #
+  # budget_scale (multiplier on your observed mean monthly spend):
+  #   1.0  = use exactly your current average monthly spend
+  #   1.20 = 20% more than current monthly spend
+  #   0.80 = 20% less than current monthly spend
+  #
+  # total_budget (explicit £ amount for the whole period):
+  #   e.g. total_budget: 100000 for exactly £100,000 per month
+  #   e.g. total_budget: 300000 for a quarterly plan (n_months: 3)
+  #   When set, this overrides budget_scale.
+  #
+  # ── RESPONSE TARGET (reverse scenarios only) ─────────────────────────────
+  # target_response: the average number of signups/deals you want per month.
+  #   null    = automatically match your current observed monthly response
+  #   400     = achieve exactly 400 signups per month
+  #   e.g. if you currently get 320 signups and want to know the cheapest
+  #        way to keep getting 320, set target_response: null
+  #
+  # ── CPA QUALITY FLOOR ────────────────────────────────────────────────────
+  # target_cpa: maximum acceptable cost per acquisition in £.
+  #   null    = no floor (allocate based purely on mROI)
+  #   250     = never allocate to a channel if its CPA exceeds £250
+  #   This is a soft guardrail — the algorithm deprioritises expensive
+  #   channels but doesn't hard-block them if the budget can't be used elsewhere.
+  #
+  # ── POSTERIOR SAMPLES ────────────────────────────────────────────────────
+  # n_samples: how many draws from the Bayesian posterior to use.
+  #   1   = use posterior mean only (fast, single-point estimate)
+  #   50  = 50 draws (slow but gives you a distribution of outcomes)
+  #   For planning purposes, 1 is usually sufficient.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  multi_period_scenarios:
+
+    # ── Scenario 1: Optimise at current budget ──────────────────────────────
+    # "Given my current monthly spend, what's the best channel split?"
+    - name          : 'Current Spend'
+      type          : forward
+      n_months      : 1           # change to 3 for quarterly, 6 for half-year, 12 for annual
+      budget_scale  : 1.0         # use observed mean monthly spend
+      total_budget  : null        # or set e.g. 100000 to override
+      target_cpa    : null        # no CPA floor
+      n_samples     : 1
+
+    # ── Scenario 2: Optimise at 20% higher budget ───────────────────────────
+    # "If I had 20% more to spend, where would the extra money go?"
+    - name          : 'Budget +20%'
+      type          : forward
+      n_months      : 1
+      budget_scale  : 1.20        # 20% more than current observed spend
+      total_budget  : null
+      target_cpa    : null
+      n_samples     : 1
+
+    # ── Scenario 3: Optimise at 20% lower budget ────────────────────────────
+    # "If I had to cut 20%, how should I cut smartly to lose the fewest signups?"
+    - name          : 'Budget -20%'
+      type          : forward
+      n_months      : 1
+      budget_scale  : 0.80        # 20% less than current observed spend
+      total_budget  : null
+      target_cpa    : null
+      n_samples     : 1
+
+    # ── Scenario 4: Reverse — disabled (slow on CPU-only backend) ──────────────
+    # Uncomment to re-enable once g++ compiler is installed for faster execution.
+    # - name            : 'Reverse - Match Current Response'
+    #   type            : reverse
+    #   n_months        : 1
+    #   target_response : null
+    #   target_cpa      : null
+    #   n_samples       : 1
+
+# ── Output settings ─────────────────────────────────────────────────────────
+output:
+  dir          : 'Bayesian_Output'   # separate folder — keeps Scenario 1 results intact

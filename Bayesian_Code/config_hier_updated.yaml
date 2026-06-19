@@ -1,0 +1,243 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Bayesian MMM — Scenario 3: Product Hierarchy (Cashback & Indulge)
+# Dataset  : HierADS.xlsx  (LONG format — auto-pivoted to wide by the pipeline)
+# Products : Cashback, Indulge
+# Channels : Google, DigitalDisplay, Apple, Meta
+# Metrics  : Impressions for modelling (Google, Apple, Meta)
+#            Spend for modelling       (DigitalDisplay — zero impressions in data)
+#            Spend always included     for ROI / Return Index calculation
+#
+#
+#
+# HOW TO RUN:
+#   cd Bayesian_Code
+#   python main.py --config config_hier_updated.yaml
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Data settings ───────────────────────────────────────────────────────────
+data:
+  csv_path     : 'HierADS.xlsx'
+  date_col     : 'Date'
+  response_col : 'response_Cashback'    # primary response (wide-format, post-pivot)
+  frequency    : 'daily'
+  dayfirst     : false                  # dates are YYYY-MM-DD
+  min_date     : '2025-01-01'
+  max_date     : '2026-02-28'
+  # If products had different start dates, set min_date to the LATER one so
+  # both products share the same time window. e.g. if Indulge starts Feb 2025:
+  #   min_date: '2025-02-01'
+
+  # ── Long-format auto-pivot ─────────────────────────────────────────────────
+  input_format      : 'long'
+  product_col       : 'Product'
+  long_response_col : 'response_metric_sales_CC'
+
+  # MODELLED metric per channel (what the model trains on)
+  # Key   = channel label  (must match 'channel' field in variables.media below)
+  # Value = source column name in the raw XLSX
+  long_media_cols:
+    Google         : 'media_impressions_CC_Google'        # ← impressions
+    DigitalDisplay : 'spends_CC_DigitalDisplay'           # ← spend (no impressions available)
+    Apple          : 'media_impressions_CC_Apple'         # ← impressions
+    Meta           : 'media_impressions_CC_Meta'          # ← impressions
+
+  # SPEND columns for ROI calculation (included in wide format but NOT modelled)
+  # Required for channels where long_media_cols points to impressions/clicks.
+  # Allows the Return Index to be reported as "deals per £1000 spent"
+  # even when impressions were used for training.
+  # DigitalDisplay is omitted here because it IS already spend above.
+  long_spend_cols:
+    Google         : 'spends_CC_Google'
+    Apple          : 'spends_CC_Apple'
+    Meta           : 'spends_CC_Meta'
+
+
+# ── Variable definitions ────────────────────────────────────────────────────
+variables:
+
+  # ── Media channels ──────────────────────────────────────────────────────────
+  # column       : wide-format column name produced by auto-pivot
+  #                impressions → 'media_impressions_{Product}_{Channel}'
+  #                spend       → 'spends_{Product}_{Channel}'
+  # channel      : must match long_media_cols key exactly
+  # metric_type  : 'impressions' or 'spend'
+  # spend_column : parallel spend column for ROI (only needed when metric_type != 'spend')
+  #                auto-pivot will include this column in the wide CSV
+
+  media:
+
+    # ── Cashback ────────────────────────────────────────────────────────────
+    - column      : 'media_impressions_Cashback_Google'
+      channel     : 'Google'
+      channel_type: 'paid_search'
+      metric_type : 'impressions'
+      spend_column: 'spends_Cashback_Google'      # ← spend col for ROI
+      family      : 'search'
+      product     : 'Cashback'
+
+    - column      : 'spends_Cashback_DigitalDisplay'
+      channel     : 'DigitalDisplay'
+      channel_type: 'display'
+      metric_type : 'spend'                        # ← spend (no impressions in data)
+      spend_column: null                           # it IS the spend col; ROI uses itself
+      family      : 'display'
+      product     : 'Cashback'
+
+    - column      : 'media_impressions_Cashback_Apple'
+      channel     : 'Apple'
+      channel_type: 'display'
+      metric_type : 'impressions'
+      spend_column: 'spends_Cashback_Apple'
+      family      : 'display'
+      product     : 'Cashback'
+
+    - column      : 'media_impressions_Cashback_Meta'
+      channel     : 'Meta'
+      channel_type: 'paid_social'
+      metric_type : 'impressions'
+      spend_column: 'spends_Cashback_Meta'
+      family      : 'social'
+      product     : 'Cashback'
+
+    # ── Indulge ─────────────────────────────────────────────────────────────
+    - column      : 'media_impressions_Indulge_Google'
+      channel     : 'Google'
+      channel_type: 'paid_search'
+      metric_type : 'impressions'
+      spend_column: 'spends_Indulge_Google'
+      family      : 'search'
+      product     : 'Indulge'
+
+    - column      : 'spends_Indulge_DigitalDisplay'
+      channel     : 'DigitalDisplay'
+      channel_type: 'display'
+      metric_type : 'spend'
+      spend_column: null
+      family      : 'display'
+      product     : 'Indulge'
+
+    - column      : 'media_impressions_Indulge_Apple'
+      channel     : 'Apple'
+      channel_type: 'display'
+      metric_type : 'impressions'
+      spend_column: 'spends_Indulge_Apple'
+      family      : 'display'
+      product     : 'Indulge'
+
+    - column      : 'media_impressions_Indulge_Meta'
+      channel     : 'Meta'
+      channel_type: 'paid_social'
+      metric_type : 'impressions'
+      spend_column: 'spends_Indulge_Meta'
+      family      : 'social'
+      product     : 'Indulge'
+
+  # ── Per-product response columns ──────────────────────────────────────────
+  product_responses:
+    - product     : 'Cashback'
+      response_col: 'response_Cashback'
+    - product     : 'Indulge'
+      response_col: 'response_Indulge'
+
+  base    : []
+  macro   : []
+  events  : []
+  controls: []
+
+
+# ── Model settings ──────────────────────────────────────────────────────────
+model:
+  baseline_type : 'linear_trend'
+  fourier_order : 1   # T=424 days supports only order 1 (need ~730 days per order)
+  use_lag       : false
+  max_lag       : 0
+
+
+# ── Hierarchical settings ───────────────────────────────────────────────────
+hierarchical:
+  enabled                   : true
+  use_two_timescale_adstock : false
+  use_synergies             : false
+  use_campaigns             : false
+  use_halos                 : false
+  use_global_hill           : false
+  use_time_varying_betas    : false
+  use_dynamic_saturation    : false
+  enable_strict_validation  : false
+  enable_outlier_detection  : true
+  enable_collinearity_check : true
+  enable_stationarity_test  : true
+
+
+# ── ALL PRIORS ──────────────────────────────────────────────────────────────
+# ⚠️  Daily data: all half-life values are in DAYS (not weeks)
+priors:
+
+  pooling:
+    family_beta_sigma  : 0.5
+    channel_beta_sigma : 0.3
+    product_beta_sigma : 0.4
+
+  # Half-life medians in DAYS (daily data)
+  families:
+    search:
+      hl_slow_median  : 14     # ~2 weeks
+      hl_ratio_median : 3.0
+      hl_sigma        : 0.4
+    display:
+      hl_slow_median  : 21     # ~3 weeks
+      hl_ratio_median : 2.5
+      hl_sigma        : 0.4
+    social:
+      hl_slow_median  : 7      # ~1 week
+      hl_ratio_median : 2.5
+      hl_sigma        : 0.4
+
+  # Per-channel priors — only needed when one channel should differ from its family default.
+  #
+  # ⚠️  MULTI-PRODUCT MODE: use the SHORT channel name as the key (e.g. 'Google', not
+  #     'media_impressions_Cashback_Google'). One entry covers all products for that channel.
+  #     If you accidentally use a full column name the pipeline will auto-resolve it and
+  #     print a NOTE — but using the short name directly avoids the ambiguity.
+  #
+  # ⚠️  HIERARCHICAL MODE (hierarchical.enabled: true):
+  #     adstock_alpha / adstock_beta are IGNORED — adstock decay is controlled entirely
+  #     by priors.families.hl_slow_median. Only beta_sigma and likelihood are effective.
+  #     The pipeline will emit a WARNING if adstock_lam_prior is set for any channel.
+  #
+  # Leave this section empty (or omit it) if all channels should follow their family defaults.
+  # Add an entry only to override a specific channel, e.g.:
+  #   Google:
+  #     beta_sigma: 0.6    # wider prior for Google only — overrides search family default
+  channels: {}
+
+
+# ── Sampling settings ───────────────────────────────────────────────────────
+sampling:
+  runtime_mode  : 'fast_20m'
+  # ⚠️  fast_20m caps: draws is capped to min(draws, 800) and tune to min(tune, 500).
+  #     The values below are the YAML inputs — actual effective values are logged at
+  #     startup as "[CONFIG] fast_20m caps applied".  Set runtime_mode: 'standard'
+  #     to use the draws/tune values here without any cap.
+  draws         : 800
+  tune          : 500
+  chains        : 2
+  target_accept : 0.95
+  max_quality_flag  : 2
+  reject_if_all_bad : false
+
+
+# ── Pipeline settings ───────────────────────────────────────────────────────
+pipeline:
+  response_transform  : 'log1p'
+  skip_stage0         : true
+  skip_map            : true   # MAP optimization fails on multi-product hierarchical models — skip it
+  top_n_map           : 8
+  top_k_refit         : 2
+  use_hybrid_fast_scan: false
+
+
+# ── Output ───────────────────────────────────────────────────────────────────
+output:
+  dir          : 'mmm_outputs_scenario3'
+  export_excel : true

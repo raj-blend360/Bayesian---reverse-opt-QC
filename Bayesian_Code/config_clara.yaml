@@ -1,0 +1,150 @@
+# ══════════════════════════════════════════════════════════════════════════════
+# Bayesian MMM — Clara (production run)
+# Dataset  : wkly_clara_data_31Jul 2.csv  (84 weekly rows, Jan 2024 – Aug 2025)
+# Response : Inbound signups (weekly)
+# Channels : DV360 (display), Google (search), LinkedIn (social), Meta (social)
+#
+# HOW TO RUN:
+#   cd Bayesian_Code
+#   python main.py --config config_clara.yaml
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Data ─────────────────────────────────────────────────────────────────────
+data:
+  csv_path     : 'wkly_clara_data_31Jul 2.csv'
+  date_col     : 'date'
+  response_col : 'response_metric_inbound_signups_total'
+  frequency    : 'weekly'
+  dayfirst     : true
+  # Data starts Jan 2024; first week is all-zero — exclude it
+  min_date     : '2024-01-08'
+  max_date     : '2025-08-04'
+
+
+# ── Variable definitions ──────────────────────────────────────────────────────
+variables:
+
+  media:
+
+    # DV360 — display channel, impressions best signal.
+    # NOTE: completely dark for first 39 weeks (Jan–Sep 2024).
+    # adstock_reset_gap_weeks=4 (set in model section) will reset the carryover
+    # across that long dark period automatically.
+    - column      : 'media_impressions_clara_dv360'
+      channel     : 'clara_dv360'
+      channel_type: 'display'
+      metric_type : 'impressions'
+      spend_column: 'spends_clara_dv360'
+      family      : 'display'
+
+    # Google — paid search, impressions (clicks corr=0.67 w/ LinkedIn — use impressions instead)
+    - column      : 'media_impressions_clara_google'
+      channel     : 'clara_google'
+      channel_type: 'paid_search'
+      metric_type : 'impressions'
+      spend_column: 'spends_clara_google'
+      family      : 'search'
+
+    # LinkedIn — paid social, impressions
+    - column      : 'media_impressions_clara_linkedin'
+      channel     : 'clara_linkedin'
+      channel_type: 'paid_social'
+      metric_type : 'impressions'
+      spend_column: 'spends_clara_linkedin'
+      family      : 'social'
+
+    # Meta — paid social, clicks (lower inter-channel correlation than impressions)
+    - column      : 'media_clicks_clara_meta'
+      channel     : 'clara_meta'
+      channel_type: 'paid_social'
+      metric_type : 'clicks'
+      spend_column: 'spends_clara_meta'
+      family      : 'social'
+
+  base    : []
+  macro   : []
+  events  : []
+  controls: []
+
+
+# ── Model ─────────────────────────────────────────────────────────────────────
+model:
+  baseline_type : 'linear_trend'
+  fourier_order : 1        # weekly data, 83 obs — pipeline caps at 1 (needs ~52 obs per order)
+  use_lag       : false
+  max_lag       : 0
+  # DV360 was dark for 39 consecutive weeks. The pipeline default of
+  # adstock_reset_gap_weeks=4 already handles this — no override needed.
+
+
+# ── Priors ────────────────────────────────────────────────────────────────────
+# Half-life values are in WEEKS (weekly data).
+priors:
+
+  # Per-channel adstock/saturation overrides.
+  # Omit a channel to use its family default below.
+  channels:
+    media_impressions_clara_dv360:
+      beta_sigma: 0.4
+    media_impressions_clara_google:
+      beta_sigma: 0.5
+    media_impressions_clara_linkedin:
+      beta_sigma: 0.3
+    media_clicks_clara_meta:
+      beta_sigma: 0.3
+
+
+# ── Sampling ──────────────────────────────────────────────────────────────────
+sampling:
+  runtime_mode  : 'standard'
+  draws         : 1500
+  tune          : 1000
+  chains        : 4
+  target_accept : 0.95
+  max_quality_flag  : 2
+  reject_if_all_bad : false
+
+
+# ── Pipeline ──────────────────────────────────────────────────────────────────
+pipeline:
+  response_transform  : 'log1p'
+  skip_stage0         : false    # scan all adstock×sat combos to pick best per channel
+  skip_map            : true     # skip MAP pre-screen — go from Stage 0 winner to full MCMC
+  top_n_map           : 8
+  top_k_refit         : 1
+  use_hybrid_fast_scan: false
+
+
+# ── Validation ────────────────────────────────────────────────────────────────
+validation:
+  enable_strict_validation  : false
+  enable_outlier_detection  : true
+  enable_collinearity_check : true
+  enable_stationarity_test  : true
+
+
+# ── Output ────────────────────────────────────────────────────────────────────
+output:
+  dir          : 'mmm_outputs_clara'
+  export_excel : true
+
+
+# ── Optimisation (budget tool) ────────────────────────────────────────────────
+optimisation:
+  budget_period      : 'monthly'
+  total_budget       : null          # set to e.g. 50000 to run budget optimisation
+  default_spend_flex : 0.30
+  step_size          : null
+  target_period      : 'monthly'
+  target_response    : null
+  channel_constraints: {}
+  cpp_rates          : {}
+
+
+# ── Scenarios ─────────────────────────────────────────────────────────────────
+scenarios:
+  budget_period   : 'monthly'
+  n_samples       : 500
+  include_current : true
+  preset_pcts     : [-20, -10, 10, 20]
+  custom          : []
