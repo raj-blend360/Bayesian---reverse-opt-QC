@@ -1,0 +1,6 @@
+channel,metric_type,target_period,current_spend,current_spend_£,min_spend_mean,min_spend_hdi_10,min_spend_hdi_90,min_spend_£_mean,min_spend_£_hdi_10,min_spend_£_hdi_90,pct_change_spend,current_response,achieved_response_mean,achieved_response_hdi_10,achieved_response_hdi_90,current_cpa,optimal_cpa,target_response,target_achievable,convergence_rate_pct,min_achievable_response,max_achievable_response
+spends_search,Spend,monthly,42180.15,42180.15,4131.45,2574.59,2574.59,4131.45,2574.59,2574.59,-90.21,37.9492,3.8381,1.7661,2.8675,1111.488652,1076.434782,,,,,
+spends_social,Spend,monthly,28561.39,28561.39,94599.12,81728.13,107777.84,94599.12,81728.13,107777.84,231.21,77.2952,196.9337,196.7302,200.9801,369.510408,480.360349,,,,,
+spends_tv,Spend,monthly,79376.42,79376.42,2574.59,2574.59,2574.59,2574.59,2574.59,2574.59,-96.76,54.7031,10.6868,9.234,12.6838,1451.041847,240.912824,,,,,
+spends_display,Spend,monthly,21521.29,21521.29,3094.61,2574.59,2574.59,3094.61,2574.59,2574.59,-85.62,17.9755,3.7839,2.7667,3.9413,1197.258927,817.828079,,,,,
+TOTAL,mixed,monthly,171639.25,171639.25,104399.78,89451.89,115501.61,104399.78,89451.89,115501.61,-39.17,187.923,215.2425,215.2425,215.2425,913.34882,485.033287,215.2425,True,100.0,58.7388,371.3234
