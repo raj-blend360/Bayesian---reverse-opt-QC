@@ -1,0 +1,7 @@
+case,status,period,budget,target,forward_response,forward_convergence_pct,forward_bounds_respected,reverse_spend,reverse_achieved,reverse_achievable,reverse_convergence_pct,error
+baseline_mean,PASS,training_mean,39472.42245810224,45.0,84.5483,100.0,True,23373.4,45.0593,True,91.7,
+under_budget,PASS,training_mean,29604.316843576682,40.5,51.6208,100.0,True,21199.93,40.6999,True,91.7,
+growth_budget,PASS,monthly,205967.1003863775,215.24250000000004,325.9479,91.7,False,104399.78,215.2425,True,100.0,
+tight_bounds,PASS,quarterly,514917.75096594373,557.6737499999999,709.0873,100.0,True,330835.61,548.8602,True,75.0,
+stretch_year,PASS,yearly,2368621.654443341,2817.72,3882.98,100.0,True,1390853.02,2817.72,True,100.0,
+infeasible_reverse,WARN,training_mean,17762.59010614601,101.25,20.2215,0.0,False,8526.04,20.2215,False,0.0,

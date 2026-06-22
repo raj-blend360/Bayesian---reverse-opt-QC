@@ -1,0 +1,7 @@
+{
+  "output_dir": "mmm_outputs/synthetic_stress",
+  "periods": 80,
+  "draws": 48,
+  "samples": 12,
+  "seed": 42
+}
