@@ -2276,19 +2276,48 @@ def optimise_budget_sequential(
         remaining_spend = monthly_budget_pp - mandatory_spend
 
         if use_dynamic_step:
-            # Dynamic step: each step = round_budget_pct × remaining unallocated spend
-            # Loop until remaining_spend is exhausted (< 0.1% of monthly_budget_pp)
+            # Dynamic step: each step = round_budget_pct × remaining unallocated spend.
+            # The loop must be guarded because channel caps/share bounds can leave
+            # budget that no channel can absorb.  Without a no-progress break,
+            # reverse sequential runs can appear to hang inside this inner loop.
             _min_step = max(monthly_budget_pp * 0.001, 1.0 / n_ppm)
-            _rem = remaining_spend
+            _rem = max(0.0, remaining_spend)
+            _no_progress_tol = max(monthly_budget_pp * 1e-10, 1e-8)
+            _max_dynamic_steps = max(100, int(np.ceil(25.0 / max(round_budget_pct, 1e-6))))
+            _dyn_iter = 0
+
             while _rem > _min_step:
+                _dyn_iter += 1
+                if _dyn_iter > _max_dynamic_steps:
+                    logger.warning(
+                        f"  [SEQ-OPT] month {m}: dynamic allocation stopped after "
+                        f"{_max_dynamic_steps} steps with £{_rem * n_ppm:,.2f} "
+                        "monthly spend still unallocated. Check channel max/share bounds."
+                    )
+                    break
+
+                _prev_alloc = alloc.copy()
+                _prev_rem = _rem
                 _dyn_step = max(_rem * round_budget_pct, _min_step)
                 alloc, _, _ = _greedy_step_sequential(
                     alloc, _dyn_step, n_ppm, opt_carry,
                     lb, ub, mean_params, cpp_w, channel_rscales, mroi_floor, slope_scaling,
                 )
-                # Recompute how much budget is still unallocated
+                # Recompute how much budget is still unallocated.  Clamp tiny
+                # floating-point negatives to zero so the loop exits cleanly.
                 allocated_spend = (alloc * cpp_w).sum() - mandatory_spend
-                _rem = remaining_spend - allocated_spend
+                _rem = max(0.0, remaining_spend - allocated_spend)
+
+                if (
+                    np.allclose(alloc, _prev_alloc, rtol=1e-10, atol=1e-12)
+                    or _rem >= _prev_rem - _no_progress_tol
+                ):
+                    logger.warning(
+                        f"  [SEQ-OPT] month {m}: dynamic allocation made no "
+                        f"further progress; £{_rem * n_ppm:,.2f} monthly spend "
+                        "remains unallocated because feasible channel headroom is exhausted."
+                    )
+                    break
         else:
             n_st = max(1, round(remaining_spend / (step_pp_spend + 1e-30)))
             for _step in range(n_st):
@@ -2822,8 +2851,8 @@ def minimise_spend_sequential(
     )
 
     # ── Binary search bounds ──────────────────────────────────────────────────
-    lo_monthly = observed_monthly_budget * 0.01   # 1% of current — definitely too low
-    hi_monthly = observed_monthly_budget * 3.0    # 3× current — definitely enough
+    lo_monthly = observed_monthly_budget * 0.01   # 1% of current
+    hi_monthly = observed_monthly_budget * 3.0    # upper search budget; checked below
 
     best_result = None
     best_budget = hi_monthly
@@ -2847,7 +2876,33 @@ def minimise_spend_sequential(
         slope_scaling     = slope_scaling,
     )
 
-    for _i in range(max_iter):
+    # Achievability pre-check: if the high budget cannot hit the target, binary
+    # search cannot find a feasible lower budget.  Return the high-budget result
+    # immediately instead of repeatedly calling the inner optimiser.
+    try:
+        df_s_hi, df_c_hi, df_m_hi = optimise_budget_sequential(
+            best, prep, total_budget=hi_monthly * n_months, **_kw
+        )
+        hi_achieved = float(df_m_hi["opt_response"].mean()) if not df_m_hi.empty else 0.0
+        hi_gap = (hi_achieved - target_response) / (target_response + 1e-12)
+        logger.info(
+            f"  [REV-SEQ] achievability check at monthly=£{hi_monthly:,.0f}: "
+            f"achieved={hi_achieved:.2f} target={target_response:.2f} gap={hi_gap:+.3f}"
+        )
+        if hi_achieved < target_response:
+            logger.warning(
+                "  [REV-SEQ] Target response is not reachable at the high "
+                "search budget (3× observed monthly spend) under the current "
+                "channel bounds/share constraints — returning that best attempt."
+            )
+            best_result = (df_s_hi, df_c_hi, df_m_hi)
+    except Exception as _e:
+        logger.warning(
+            f"  [REV-SEQ] Achievability check at 3× observed spend failed: {_e}. "
+            "Continuing with bounded binary search."
+        )
+
+    for _i in range(max_iter if best_result is None else 0):
         mid_monthly = (lo_monthly + hi_monthly) / 2.0
         total_b     = mid_monthly * n_months
 
@@ -2856,15 +2911,15 @@ def minimise_spend_sequential(
                 best, prep, total_budget=total_b, **_kw
             )
         except Exception as _e:
-            logger.debug(f"  [REV-SEQ] iter {_i}: budget={total_b:.0f} failed: {_e}")
+            logger.info(f"  [REV-SEQ] iter {_i + 1}/{max_iter}: budget={total_b:.0f} failed: {_e}")
             lo_monthly = mid_monthly
             continue
 
         achieved = float(df_m["opt_response"].mean()) if not df_m.empty else 0.0
         gap      = (achieved - target_response) / (target_response + 1e-12)
 
-        logger.debug(
-            f"  [REV-SEQ] iter {_i:2d}: monthly=£{mid_monthly:,.0f}  "
+        logger.info(
+            f"  [REV-SEQ] iter {_i + 1}/{max_iter}: monthly=£{mid_monthly:,.0f}  "
             f"achieved={achieved:.2f}  target={target_response:.2f}  gap={gap:+.3f}"
         )
 
